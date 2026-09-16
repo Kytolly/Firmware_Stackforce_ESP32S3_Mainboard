@@ -2,7 +2,7 @@
 #define STACKFORCE_COMMAND_INPUT_H
 
 #include <stdint.h>
-#include "command_context.h"
+#include "high_level_command.h"
 
 class CommandInputPlugin {
 public:
@@ -10,8 +10,8 @@ public:
   virtual const char *source() const = 0;
   virtual const char *ingress() const = 0;
   virtual bool enabled() const = 0;
-  virtual CommandContext context(float forward, float steering, float height,
-                                 float roll, uint8_t control_mode,
+  virtual HighLevelCommand context(float forward, float steering, float height,
+                                 float roll, float wheel_throttle, uint8_t control_mode,
                                  uint8_t motion_mode, uint8_t steady_state,
                                  uint32_t timestamp_us) const = 0;
 };

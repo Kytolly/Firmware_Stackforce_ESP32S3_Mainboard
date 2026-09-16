@@ -10,6 +10,8 @@
 #include "pid.h"
 #include "command_context.h"
 #include "ppm_remote_input.h"
+#include "host_command_input.h"
+#include "low_level_command.h"
 #include "instrumentation.h"
 
 
@@ -38,6 +40,26 @@ float uint_to_float(int x_int, float x_min, float x_max, int bits);
 motor_data MotorData;
 motorstatus motorStatus;
 PpmRemoteInputPlugin remote_input;
+HostCommandInput host_input;
+extern SF_Servo servos;
+
+void executeServoCommand(const LowLevelCommand &command)
+{
+  servos.setAngle(command.channel, (uint16_t)command.target);
+  instrumentationObserveServo(command.channel, command.target);
+}
+
+void executeRearWheelCommand(const LowLevelCommand &m0, const LowLevelCommand &m1)
+{
+  motors.setTargets(m0.target, m1.target);
+  instrumentationObserveWheel("REAR", m0.channel, m0.target);
+  instrumentationObserveWheel("REAR", m1.channel, m1.target);
+}
+
+void observeFrontWheelCommand(const LowLevelCommand &command)
+{
+  instrumentationObserveWheel("FRONT", command.channel, command.target);
+}
 
 float servo_off[8] = {3,5,-5,-7,3,-5,-8,8}; //舵机偏移量
 int flat = 0;//模式切换标志位
@@ -268,24 +290,20 @@ void setServoAngle(uint16_t servoLeftFront, uint16_t servoLeftRear,
   const uint16_t target4 = servoLeftRear + servo_off[3];
   const uint16_t target2 = servoRightFront + servo_off[1];
   const uint16_t target1 = servoRightRear + servo_off[0];
-  servos.setAngle(3, target3);  // 1左前腿 -前
-  servos.setAngle(4, target4);   // 1左前腿 -后
-  servos.setAngle(2, target2); // 1右前腿 - 前
-  servos.setAngle(1, target1);  // 1右前腿 - 后
-  instrumentationObserveServo(3, target3); instrumentationObserveServo(4, target4);
-  instrumentationObserveServo(2, target2); instrumentationObserveServo(1, target1);
+  executeServoCommand({"SERVO", "PCA9685", 3, (float)target3, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 4, (float)target4, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 2, (float)target2, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 1, (float)target1, "deg", micros()});
   
   // 控制后两条腿
   const uint16_t target7 = servoBackLeftFront + servo_off[6];
   const uint16_t target8 = servoBackLeftRear + servo_off[7];
   const uint16_t target6 = servoBackRightFront + servo_off[5];
   const uint16_t target5 = servoBackRightRear + servo_off[4];
-  servos.setAngle(7, target7); // 右后腿-后
-  servos.setAngle(8, target8);   // 右后腿-前
-  servos.setAngle(6, target6);// 左后腿-后
-  servos.setAngle(5, target5);  // 左后腿-前
-  instrumentationObserveServo(7, target7); instrumentationObserveServo(8, target8);
-  instrumentationObserveServo(6, target6); instrumentationObserveServo(5, target5);
+  executeServoCommand({"SERVO", "PCA9685", 7, (float)target7, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 8, (float)target8, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 6, (float)target6, "deg", micros()});
+  executeServoCommand({"SERVO", "PCA9685", 5, (float)target5, "deg", micros()});
 }
 
 int16_t alphaLeftToAngle, betaLeftToAngle, alphaRightToAngle, betaRightToAngle;
@@ -495,8 +513,10 @@ void setup()
   motors.setModes(4, 4);
 
 
+#if COMMAND_SOURCE_PPM_ENABLED
   pinMode(PPM_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(PPM_PIN), onPPMInterrupt, RISING);
+#endif
 
   trot();//让机器人初始状态是站立的，让陀螺仪自检
   inverseKinematics();
@@ -639,9 +659,11 @@ void can_control()
     motorcommand[6] = 0;          
     motorcommand[7] = 0;
 
+    const LowLevelCommand front1("WHEEL", "CAN_DEVICE_02", 1, MotorData.motor1taget, "raw", micros());
+    const LowLevelCommand front2("WHEEL", "CAN_DEVICE_02", 2, MotorData.motor2taget, "raw", micros());
+    observeFrontWheelCommand(front1);
+    observeFrontWheelCommand(front2);
     CAN.sendMsg(&t_id, motorcommand);//发送数据
-    instrumentationObserveWheel("FRONT", 1, MotorData.motor1taget);
-    instrumentationObserveWheel("FRONT", 2, MotorData.motor2taget);
   }
 }
 
@@ -683,14 +705,30 @@ void read(){
 
 float roll_EH_target=0;
 float roll_EH_rate = 5; // 滚动高度变化速率
+void applyHighLevelCommand(const HighLevelCommand &command, float &wheelThrottle)
+{
+  forwardBackward = command.forward;
+  steering = command.steering;
+  remote_H = command.height;
+  roll_EH = command.roll;
+  controlmode = command.control_mode;
+  motionMode = command.motion_mode;
+  steadyState = command.steady_state;
+  wheelThrottle = command.wheel_throttle;
+}
+
 void loop()
 {
+#if COMMAND_SOURCE_PPM_ENABLED
   read(); // 串口读取
+#endif
   can_control();
 
   mpu6050.update();
+#if COMMAND_SOURCE_PPM_ENABLED
   remote_mode_switch();
   mode_change();
+#endif
   pitch = mpu6050.getAngleX()+pitch_off;
   if(pitch > -1 && pitch < 1)pitch = 0;
   roll = -mpu6050.getAngleY()+roll_off;
@@ -700,6 +738,7 @@ void loop()
   gyroX = mpu6050.getGyroX();
   gyroZ = mpu6050.getGyroZ();
   instrumentationObserveImu(pitch, roll, yaw, gyroX, gyroY, gyroZ);
+#if COMMAND_SOURCE_PPM_ENABLED
   filteredPPMValues11 = lowPassFilter(ppmValues[0], filteredPPMValues11, alpha);
   filteredPPMValues22 = lowPassFilter(ppmValues[1], filteredPPMValues22, alpha);
   filteredPPMValues33 = lowPassFilter(ppmValues[2], filteredPPMValues33, alpha);
@@ -730,9 +769,19 @@ void loop()
 
   forwardBackward = mapJoystickValuerollforwardback(filteredPPMValues2);//遥控器前后
   steering = mapJoystickValuesteering(filteredPPMValues1);//遥控器左右
+  float mappedValue = mapToRange(filteredPPMValues6);
+  if (mappedValue < 0.06)
+    mappedValue = 0;
   CommandContext command_context = remote_input.context(
-      forwardBackward, steering, remote_H, roll_EH, controlmode, motionMode,
+      forwardBackward, steering, remote_H, roll_EH, mappedValue, controlmode, motionMode,
       steadyState, micros());
+#else
+  static HighLevelCommand host_command;
+  host_input.poll(host_command);
+  float mappedValue = host_command.wheel_throttle;
+  CommandContext command_context = host_command;
+#endif
+  applyHighLevelCommand(command_context, mappedValue);
   instrumentationObserveCommand(command_context);
   target_vel = 1 * (motorStatus.M0Speed + motorStatus.M1Speed)/2;
   target_vel = lowPassFilter(target_vel, target_vel_prev, alpha);
@@ -749,9 +798,6 @@ void loop()
   }
   target_vel_prev = target_vel;
 
-  float mappedValue = mapToRange(filteredPPMValues6);
-  if (mappedValue < 0.06)
-    mappedValue = 0;
   if (controlmode == 0)
   {
     motor1target = 0.35 * (forwardBackward + 0.32 * motorStatus.M0Speed) - 1 * steering / 3;//左后
@@ -778,14 +824,16 @@ void loop()
   
   //控制模式
   if(flat==0)
-    motors.setTargets(motorStatus.M0Dir*motor1target, motorStatus.M1Dir*motor2target);
+    executeRearWheelCommand(
+      {"WHEEL", "LOCAL_BLDC", 0, motorStatus.M0Dir*motor1target, "raw", micros()},
+      {"WHEEL", "LOCAL_BLDC", 1, motorStatus.M1Dir*motor2target, "raw", micros()});
   //调试模式
   else if(flat==1)
-    motors.setTargets(2, 2);
+    executeRearWheelCommand(
+      {"WHEEL", "LOCAL_BLDC", 0, 2, "raw", micros()},
+      {"WHEEL", "LOCAL_BLDC", 1, 2, "raw", micros()});
   MotorData.motor1taget = motorStatus.M4Dir*sendmotor1target;//can发送给另一块主控的右前轮目标速度
   MotorData.motor2taget = motorStatus.M3Dir*sendmotor2target;//can发送给另一块主控的左前轮目标速度
-  instrumentationObserveWheel("REAR", 0, motorStatus.M0Dir * (flat == 0 ? motor1target : 2));
-  instrumentationObserveWheel("REAR", 1, motorStatus.M1Dir * (flat == 0 ? motor2target : 2));
 
   
   if (t >= Ts)

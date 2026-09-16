@@ -2,6 +2,7 @@
 
 #ifdef STACKFORCE_INSTRUMENTATION
 #include <Arduino.h>
+#include "low_level_command.h"
 
 namespace {
 struct Snapshot {
@@ -26,7 +27,7 @@ void emitSnapshot() {
   Serial.printf(
       "{\"record_type\":\"SAMPLE\",\"timestamp_us\":%llu,\"seq\":%llu,"
       "\"source\":\"%s\",\"ingress\":\"%s\","
-      "\"command\":{\"forward\":%.3f,\"steering\":%.3f,\"height\":%.3f,\"roll\":%.3f,"
+      "\"command\":{\"forward\":%.3f,\"steering\":%.3f,\"height\":%.3f,\"roll\":%.3f,\"wheel_throttle\":%.3f,"
       "\"control_mode\":%u,\"motion_mode\":%u,\"steady_state\":%u},"
       "\"servo_targets_deg\":[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f],"
       "\"wheel_targets_raw\":[%.3f,%.3f,%.3f,%.3f],"
@@ -34,7 +35,7 @@ void emitSnapshot() {
       "\"wheel_feedback_raw\":[%.3f,%.3f]}\n",
       (unsigned long long)timestamp_us, (unsigned long long)snapshot.seq++,
       snapshot.command.source, snapshot.command.ingress,
-      snapshot.command.forward, snapshot.command.steering, snapshot.command.height, snapshot.command.roll,
+      snapshot.command.forward, snapshot.command.steering, snapshot.command.height, snapshot.command.roll, snapshot.command.wheel_throttle,
       snapshot.command.control_mode, snapshot.command.motion_mode, snapshot.command.steady_state,
       snapshot.servo[0], snapshot.servo[1], snapshot.servo[2], snapshot.servo[3],
       snapshot.servo[4], snapshot.servo[5], snapshot.servo[6], snapshot.servo[7],
