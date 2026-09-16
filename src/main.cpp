@@ -8,6 +8,8 @@
 #include "config.h"
 #include "SF_BLDC.h"
 #include "pid.h"
+#include "command_context.h"
+#include "instrumentation.h"
 
 
 SF_BLDC motors = SF_BLDC(Serial2);
@@ -260,16 +262,28 @@ void setServoAngle(uint16_t servoLeftFront, uint16_t servoLeftRear,
                    uint16_t servoBackRightFront, uint16_t servoBackRightRear)
 {
   // 控制前两条腿
-  servos.setAngle(3, servoLeftFront + servo_off[2]);  // 1左前腿 -前
-  servos.setAngle(4, servoLeftRear + servo_off[3]);   // 1左前腿 -后
-  servos.setAngle(2, servoRightFront + servo_off[1]); // 1右前腿 - 前
-  servos.setAngle(1, servoRightRear + servo_off[0]);  // 1右前腿 - 后
+  const uint16_t target3 = servoLeftFront + servo_off[2];
+  const uint16_t target4 = servoLeftRear + servo_off[3];
+  const uint16_t target2 = servoRightFront + servo_off[1];
+  const uint16_t target1 = servoRightRear + servo_off[0];
+  servos.setAngle(3, target3);  // 1左前腿 -前
+  servos.setAngle(4, target4);   // 1左前腿 -后
+  servos.setAngle(2, target2); // 1右前腿 - 前
+  servos.setAngle(1, target1);  // 1右前腿 - 后
+  instrumentationObserveServo(3, target3); instrumentationObserveServo(4, target4);
+  instrumentationObserveServo(2, target2); instrumentationObserveServo(1, target1);
   
   // 控制后两条腿
-  servos.setAngle(7, servoBackLeftFront + servo_off[6]); // 右后腿-后
-  servos.setAngle(8, servoBackLeftRear + servo_off[7]);   // 右后腿-前
-  servos.setAngle(6, servoBackRightFront + servo_off[5]);// 左后腿-后
-  servos.setAngle(5, servoBackRightRear + servo_off[4]);  // 左后腿-前
+  const uint16_t target7 = servoBackLeftFront + servo_off[6];
+  const uint16_t target8 = servoBackLeftRear + servo_off[7];
+  const uint16_t target6 = servoBackRightFront + servo_off[5];
+  const uint16_t target5 = servoBackRightRear + servo_off[4];
+  servos.setAngle(7, target7); // 右后腿-后
+  servos.setAngle(8, target8);   // 右后腿-前
+  servos.setAngle(6, target6);// 左后腿-后
+  servos.setAngle(5, target5);  // 左后腿-前
+  instrumentationObserveServo(7, target7); instrumentationObserveServo(8, target8);
+  instrumentationObserveServo(6, target6); instrumentationObserveServo(5, target5);
 }
 
 int16_t alphaLeftToAngle, betaLeftToAngle, alphaRightToAngle, betaRightToAngle;
@@ -489,6 +503,7 @@ void setup()
   mpu6050.calcGyroOffsets(true,1000,1000);
   Serial.println("初始化完成");
   delay(5000);
+  instrumentationBegin();
 }
 
 float rollBias, pitchBias;
@@ -562,6 +577,7 @@ void getMotorValue()
   BLDCData = motors.getBLDCData();
   motorStatus.M0Speed = motorStatus.M0SpdDir * BLDCData.M0_Vel;
   motorStatus.M1Speed = motorStatus.M1SpdDir * BLDCData.M1_Vel;
+  instrumentationObserveWheelFeedback(BLDCData.M0_Vel, BLDCData.M1_Vel);
 }
 
 float mapToRange(float input)
@@ -622,6 +638,8 @@ void can_control()
     motorcommand[7] = 0;
 
     CAN.sendMsg(&t_id, motorcommand);//发送数据
+    instrumentationObserveWheel("FRONT", 1, MotorData.motor1taget);
+    instrumentationObserveWheel("FRONT", 2, MotorData.motor2taget);
   }
 }
 
@@ -679,6 +697,7 @@ void loop()
   gyroY = mpu6050.getGyroY();
   gyroX = mpu6050.getGyroX();
   gyroZ = mpu6050.getGyroZ();
+  instrumentationObserveImu(pitch, roll, yaw, gyroX, gyroY, gyroZ);
   filteredPPMValues11 = lowPassFilter(ppmValues[0], filteredPPMValues11, alpha);
   filteredPPMValues22 = lowPassFilter(ppmValues[1], filteredPPMValues22, alpha);
   filteredPPMValues33 = lowPassFilter(ppmValues[2], filteredPPMValues33, alpha);
@@ -709,6 +728,15 @@ void loop()
 
   forwardBackward = mapJoystickValuerollforwardback(filteredPPMValues2);//遥控器前后
   steering = mapJoystickValuesteering(filteredPPMValues1);//遥控器左右
+  CommandContext command_context;
+  command_context.forward = forwardBackward;
+  command_context.steering = steering;
+  command_context.height = remote_H;
+  command_context.roll = roll_EH;
+  command_context.control_mode = controlmode;
+  command_context.motion_mode = motionMode;
+  command_context.steady_state = steadyState;
+  instrumentationObserveCommand(command_context);
   target_vel = 1 * (motorStatus.M0Speed + motorStatus.M1Speed)/2;
   target_vel = lowPassFilter(target_vel, target_vel_prev, alpha);
   target_forwardback = 2.2 * forwardBackward;
@@ -759,6 +787,8 @@ void loop()
     motors.setTargets(2, 2);
   MotorData.motor1taget = motorStatus.M4Dir*sendmotor1target;//can发送给另一块主控的右前轮目标速度
   MotorData.motor2taget = motorStatus.M3Dir*sendmotor2target;//can发送给另一块主控的左前轮目标速度
+  instrumentationObserveWheel("REAR", 0, motorStatus.M0Dir * (flat == 0 ? motor1target : 2));
+  instrumentationObserveWheel("REAR", 1, motorStatus.M1Dir * (flat == 0 ? motor2target : 2));
 
   
   if (t >= Ts)
@@ -792,5 +822,6 @@ void loop()
   }
   
   inverseKinematics();
+  instrumentationService();
 
 }
