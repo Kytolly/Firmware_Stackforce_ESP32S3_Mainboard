@@ -9,6 +9,7 @@
 #include "SF_BLDC.h"
 #include "pid.h"
 #include "command_context.h"
+#include "ppm_remote_input.h"
 #include "instrumentation.h"
 
 
@@ -36,6 +37,7 @@ float uint_to_float(int x_int, float x_min, float x_max, int bits);
 
 motor_data MotorData;
 motorstatus motorStatus;
+PpmRemoteInputPlugin remote_input;
 
 float servo_off[8] = {3,5,-5,-7,3,-5,-8,8}; //舵机偏移量
 int flat = 0;//模式切换标志位
@@ -728,14 +730,9 @@ void loop()
 
   forwardBackward = mapJoystickValuerollforwardback(filteredPPMValues2);//遥控器前后
   steering = mapJoystickValuesteering(filteredPPMValues1);//遥控器左右
-  CommandContext command_context;
-  command_context.forward = forwardBackward;
-  command_context.steering = steering;
-  command_context.height = remote_H;
-  command_context.roll = roll_EH;
-  command_context.control_mode = controlmode;
-  command_context.motion_mode = motionMode;
-  command_context.steady_state = steadyState;
+  CommandContext command_context = remote_input.context(
+      forwardBackward, steering, remote_H, roll_EH, controlmode, motionMode,
+      steadyState, micros());
   instrumentationObserveCommand(command_context);
   target_vel = 1 * (motorStatus.M0Speed + motorStatus.M1Speed)/2;
   target_vel = lowPassFilter(target_vel, target_vel_prev, alpha);

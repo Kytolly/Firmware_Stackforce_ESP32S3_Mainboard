@@ -13,8 +13,10 @@ StackForce mainboard firmware for robot-side execution, instrumentation, safety,
 - [x] Remote-controlled locomotion
 - [x] Robot-side instrumentation
 - [x] Unified telemetry interface
+- [x] Pluggable command-input interface
+- [x] PPM remote input plugin
+- [ ] Host / companion-computer input plugin
 - [x] Command-source identification
-- [ ] Laptop command input
 - [ ] Control-source arbitration
 - [ ] Runtime diagnostic mode
 - [ ] Session / rollout metadata

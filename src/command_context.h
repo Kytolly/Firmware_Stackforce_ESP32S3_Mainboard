@@ -7,6 +7,7 @@
 struct CommandContext {
   const char *source = command_sources::RemotePpmRegistration::source;
   const char *ingress = command_sources::RemotePpmRegistration::ingress;
+  uint32_t timestamp_us = 0;
   float forward = 0;
   float steering = 0;
   float height = 0;
